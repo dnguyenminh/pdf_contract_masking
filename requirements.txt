@@ -1,0 +1,16 @@
+# Core runtime dependencies (pip)
+transformers>=4.30.0
+tqdm
+PyMuPDF
+regex
+sentencepiece
+tokenizers
+
+# NOTE: Installing torch via pip is possible but conda is recommended for binary compatibility.
+# If using pip, uncomment and choose the correct torch wheel for your platform.
+# torch
+# torchvision
+# torchaudio
+
+# For editable install during development
+-e .

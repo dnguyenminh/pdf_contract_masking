@@ -1,0 +1,24 @@
+{
+    "713e0ffd5ef0cf28baae816639ddb4a8f596aa88b7b79e561bb53d50b8c8161b": [
+        {
+            "page": 0,
+            "anchor": "Số CMND: <ID>",
+            "pattern": "(\\b\\d{9}\\b|\\b\\d{12}\\b)"
+        },
+        {
+            "page": 0,
+            "anchor": "Số điện thoại: <ID>",
+            "pattern": "(\\b(?:84|0)\\d{9}\\b)"
+        },
+        {
+            "page": 0,
+            "anchor": "Số điện thoại",
+            "pattern": "(\\b\\d{9}\\b|\\b\\d{12}\\b)"
+        },
+        {
+            "page": 0,
+            "anchor": "Số điện thoại",
+            "pattern": "(\\b(?:84|0)\\d{9}\\b)"
+        }
+    ]
+}

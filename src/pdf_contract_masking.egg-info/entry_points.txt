@@ -1,0 +1,2 @@
+[console_scripts]
+pdf-mask = pdf_contract_masking.cli:main

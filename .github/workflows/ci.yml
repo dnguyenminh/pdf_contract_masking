@@ -1,0 +1,32 @@
+name: CI
+
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+    branches: [ main, master ]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Miniconda (with mamba)
+        uses: conda-incubator/setup-miniconda@v3
+        with:
+          miniconda-version: latest
+          auto-update-conda: true
+          python-version: 3.11
+          activate-environment: false
+          use-mamba: true
+
+      - name: Create conda environment from environment.yml (mamba)
+        run: |
+          mamba env create -f environment.yml -p ./.conda_env
+
+      - name: Activate and run tests
+        run: |
+          conda run -p ./.conda_env python -m pip install --upgrade pip
+          conda run -p ./.conda_env python -m pip install --upgrade setuptools wheel
+          conda run -p ./.conda_env python -m unittest discover -v
