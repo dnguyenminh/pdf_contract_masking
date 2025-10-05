@@ -102,15 +102,16 @@ To ensure Vietnamese text renders correctly in generated PDFs:
 1) Download a Unicode TTF such as Noto Sans (Regular) and place it in `./fonts/NotoSans-Regular.ttf`.
 	- Noto Sans download: https://fonts.google.com/specimen/Noto+Sans
 
-2) Automatic downloader (recommended)
 
-	A tiny helper script is included to fetch Noto Sans into `./fonts` if you don't have it locally. This is idempotent and safe to run in CI before tests.
+2) Font (bundled)
+
+	The Noto Sans Regular TTF is included in this repository at `./fonts/NotoSans-Regular.ttf` so tests can run offline without network access. You can still use the downloader if you prefer to refresh the file:
 
 	```powershell
 	python scripts/get_noto.py
 	```
 
-3) Run the sample generator (it will embed the font if found):
+3) Run the sample generator (it will embed the bundled font):
 
 ```powershell
 python create_sample_contract.py
