@@ -39,6 +39,22 @@ CUSTOMER_KEYWORDS = ['khách hàng', 'bên mua', 'bên b', 'bên được bảo 
 ID_REGEX = re.compile(r"(\b\d{9}\b|\b\d{12}\b)")
 PHONE_REGEX = re.compile(r"(\b(?:84|0)\d{9}\b)")
 KNOWLEDGE_BASE_FILE = "customer_redaction_rules.json"
+REDACTION_CONFIG_FILE = "redaction_config.json"
+
+def load_redaction_config():
+    if os.path.exists(REDACTION_CONFIG_FILE):
+        try:
+            with open(REDACTION_CONFIG_FILE, 'r', encoding='utf-8') as f:
+                return json.load(f)
+        except Exception:
+            pass
+    # default
+    return {
+        "id": {"left_keep": 2, "right_keep": 2},
+        "phone": {"left_keep": 4, "right_keep": 2}
+    }
+
+REDACTION_CONFIG = load_redaction_config()
 
 # --- (Các phần code còn lại giữ nguyên như phiên bản cuối cùng) ---
 # --- PHẦN 2: CÁC HÀM TIỆN ÍCH ---
@@ -254,6 +270,37 @@ def apply_rules(doc, rules):
         if len(digits) > 2:
             return f"{digits[0]}...{digits[-1]}"
         return digits
+    def get_mid_redact_rect(page, area: fitz.Rect, token: str, left_keep: int, right_keep: int):
+        # Try to use per-character bounding boxes when available
+        digits = re.sub(r"\D", "", token)
+        if not digits:
+            return area
+        try:
+            chars = page.get_text('chars')  # list of tuples with bbox and char
+            # select chars that intersect the token area and are digits
+            digit_chars = [ (fitz.Rect(c[0],c[1],c[2],c[3]), c[4]) for c in chars if fitz.Rect(c[0],c[1],c[2],c[3]).intersects(area) and c[4].isdigit() ]
+            if len(digit_chars) >= left_keep + right_keep + 1:
+                # keep first/last as requested, redact the middle chars
+                mid_chars = digit_chars[left_keep: len(digit_chars)-right_keep]
+                if mid_chars:
+                    # union rects of mid_chars
+                    r0 = mid_chars[0][0]
+                    for rc, ch in mid_chars[1:]:
+                        r0 |= rc
+                    return r0
+        except Exception:
+            pass
+        # fallback: split area width proportionally
+        try:
+            char_w = area.width / max(1, len(digits))
+            x0 = area.x0 + char_w * left_keep
+            x1 = area.x0 + char_w * (len(digits) - right_keep)
+            if x1 > x0 + 1:
+                return fitz.Rect(x0, area.y0, x1, area.y1)
+        except Exception:
+            pass
+        return area
+
     for rule in rules:
         page_num, anchor, pattern_str = rule['page'], rule['anchor'], rule['pattern']
         pattern = re.compile(pattern_str)
@@ -271,10 +318,64 @@ def apply_rules(doc, rules):
                         token = match.group(0)
                         masked = mask_token_display(token, pattern_str)
                         redaction_areas = page.search_for(token, clip=search_rect)
+                        def get_mid_redact_rect(page, area: fitz.Rect, token: str, left_keep: int, right_keep: int):
+                            # Try to use per-character bounding boxes when available
+                            digits = re.sub(r"\D", "", token)
+                            if not digits:
+                                return area
+                            try:
+                                chars = page.get_text('chars')  # list of tuples with bbox and char
+                                # select chars that intersect the token area and are digits
+                                digit_chars = [ (fitz.Rect(c[0],c[1],c[2],c[3]), c[4]) for c in chars if fitz.Rect(c[0],c[1],c[2],c[3]).intersects(area) and c[4].isdigit() ]
+                                if len(digit_chars) >= left_keep + right_keep + 1:
+                                    # keep first/last as requested, redact the middle chars
+                                    mid_chars = digit_chars[left_keep: len(digit_chars)-right_keep]
+                                    if mid_chars:
+                                        # union rects of mid_chars
+                                        r0 = mid_chars[0][0]
+                                        for rc, ch in mid_chars[1:]:
+                                            r0 |= rc
+                                        return r0
+                            except Exception:
+                                pass
+                            # fallback: split area width proportionally
+                            try:
+                                char_w = area.width / max(1, len(digits))
+                                x0 = area.x0 + char_w * left_keep
+                                x1 = area.x0 + char_w * (len(digits) - right_keep)
+                                if x1 > x0 + 1:
+                                    return fitz.Rect(x0, area.y0, x1, area.y1)
+                            except Exception:
+                                pass
+                            return area
+
                         for area in redaction_areas:
+                            # compute how many digits to keep at sides
+                            digits = re.sub(r"\D", "", token)
+                            if (pattern_str == ID_REGEX.pattern or ID_REGEX.fullmatch(digits)) and len(digits) >= 4:
+                                cfg = REDACTION_CONFIG.get('id', {})
+                                left_keep = int(cfg.get('left_keep', 2))
+                                right_keep = int(cfg.get('right_keep', 2))
+                            elif (pattern_str == PHONE_REGEX.pattern or PHONE_REGEX.fullmatch(digits)) and len(digits) >= 6:
+                                cfg = REDACTION_CONFIG.get('phone', {})
+                                left_keep = int(cfg.get('left_keep', 4))
+                                right_keep = int(cfg.get('right_keep', 2))
+                            else:
+                                left_keep, right_keep = 0, 0
+
+                            redact_rect = get_mid_redact_rect(page, area, token, left_keep, right_keep)
                             overlay = visible_token_overlay(token, pattern_str)
-                            page.add_redact_annot(area, fill=(0, 0, 0))
-                            overlays.append((page_num, area, overlay, pattern_str, token))
+                            try:
+                                page.draw_rect(redact_rect, color=(0, 0, 0), fill=(0, 0, 0))
+                            except Exception:
+                                try:
+                                    s2 = page.new_shape()
+                                    s2.draw_rect(redact_rect)
+                                    s2.finish(fill=(0,0,0))
+                                    s2.commit()
+                                except Exception:
+                                    page.add_redact_annot(redact_rect, fill=(0, 0, 0))
+                            overlays.append((page_num, redact_rect, overlay, pattern_str, token))
                             total_redactions += 1
                         matched_any = True
                         continue
@@ -287,9 +388,31 @@ def apply_rules(doc, rules):
                         masked = mask_token_display(token, pattern_str)
                         redaction_areas = page.search_for(token, clip=an_rect)
                         for area in redaction_areas:
+                            # compute mid redact rect for this area
+                            digits = re.sub(r"\D", "", token)
+                            if (pattern_str == ID_REGEX.pattern or ID_REGEX.fullmatch(digits)) and len(digits) >= 4:
+                                cfg = REDACTION_CONFIG.get('id', {})
+                                left_keep = int(cfg.get('left_keep', 2))
+                                right_keep = int(cfg.get('right_keep', 2))
+                            elif (pattern_str == PHONE_REGEX.pattern or PHONE_REGEX.fullmatch(digits)) and len(digits) >= 6:
+                                cfg = REDACTION_CONFIG.get('phone', {})
+                                left_keep = int(cfg.get('left_keep', 4))
+                                right_keep = int(cfg.get('right_keep', 2))
+                            else:
+                                left_keep, right_keep = 0, 0
+                            redact_rect = get_mid_redact_rect(page, area, token, left_keep, right_keep)
                             overlay = visible_token_overlay(token, pattern_str)
-                            page.add_redact_annot(area, fill=(0, 0, 0))
-                            overlays.append((page_num, area, overlay, pattern_str, token))
+                            try:
+                                page.draw_rect(redact_rect, color=(0,0,0), fill=(0,0,0))
+                            except Exception:
+                                try:
+                                    s4 = page.new_shape()
+                                    s4.draw_rect(redact_rect)
+                                    s4.finish(fill=(0,0,0))
+                                    s4.commit()
+                                except Exception:
+                                    page.add_redact_annot(redact_rect, fill=(0,0,0))
+                            overlays.append((page_num, redact_rect, overlay, pattern_str, token))
                             total_redactions += 1
                         matched_any = True
                         continue
@@ -302,9 +425,31 @@ def apply_rules(doc, rules):
                         masked = mask_token_display(token, pattern_str)
                         redaction_areas = page.search_for(token)
                         for area in redaction_areas:
+                            # compute mid redact rect for this area
+                            digits = re.sub(r"\D", "", token)
+                            if (pattern_str == ID_REGEX.pattern or ID_REGEX.fullmatch(digits)) and len(digits) >= 4:
+                                cfg = REDACTION_CONFIG.get('id', {})
+                                left_keep = int(cfg.get('left_keep', 2))
+                                right_keep = int(cfg.get('right_keep', 2))
+                            elif (pattern_str == PHONE_REGEX.pattern or PHONE_REGEX.fullmatch(digits)) and len(digits) >= 6:
+                                cfg = REDACTION_CONFIG.get('phone', {})
+                                left_keep = int(cfg.get('left_keep', 4))
+                                right_keep = int(cfg.get('right_keep', 2))
+                            else:
+                                left_keep, right_keep = 0, 0
+                            redact_rect = get_mid_redact_rect(page, area, token, left_keep, right_keep)
                             overlay = visible_token_overlay(token, pattern_str)
-                            page.add_redact_annot(area, fill=(0, 0, 0))
-                            overlays.append((page_num, area, overlay, pattern_str, token))
+                            try:
+                                page.draw_rect(redact_rect, color=(0,0,0), fill=(0,0,0))
+                            except Exception:
+                                try:
+                                    s5 = page.new_shape()
+                                    s5.draw_rect(redact_rect)
+                                    s5.finish(fill=(0,0,0))
+                                    s5.commit()
+                                except Exception:
+                                    page.add_redact_annot(redact_rect, fill=(0,0,0))
+                            overlays.append((page_num, redact_rect, overlay, pattern_str, token))
                             total_redactions += 1
             else:
                 # Fallback: search entire page text for pattern and redact all matches
@@ -314,14 +459,32 @@ def apply_rules(doc, rules):
                     masked = mask_token_display(token, pattern_str)
                     redaction_areas = page.search_for(token)
                     for area in redaction_areas:
-                        overlay = visible_token_overlay(token, pattern_str)
-                        page.add_redact_annot(area, fill=(0, 0, 0))
-                        overlays.append((page_num, area, overlay, pattern_str, token))
-                        total_redactions += 1
-    # Apply all redact annotations (fills the black boxes)
-    for page in doc:
-        if page.annots(types=[fitz.PDF_ANNOT_REDACT]):
-            page.apply_redactions()
+                            digits = re.sub(r"\D", "", token)
+                            if (pattern_str == ID_REGEX.pattern or ID_REGEX.fullmatch(digits)) and len(digits) >= 4:
+                                cfg = REDACTION_CONFIG.get('id', {})
+                                left_keep = int(cfg.get('left_keep', 2))
+                                right_keep = int(cfg.get('right_keep', 2))
+                            elif (pattern_str == PHONE_REGEX.pattern or PHONE_REGEX.fullmatch(digits)) and len(digits) >= 6:
+                                cfg = REDACTION_CONFIG.get('phone', {})
+                                left_keep = int(cfg.get('left_keep', 4))
+                                right_keep = int(cfg.get('right_keep', 2))
+                            else:
+                                left_keep, right_keep = 0, 0
+                            redact_rect = get_mid_redact_rect(page, area, token, left_keep, right_keep)
+                            overlay = visible_token_overlay(token, pattern_str)
+                            try:
+                                page.draw_rect(redact_rect, color=(0,0,0), fill=(0,0,0))
+                            except Exception:
+                                try:
+                                    s6 = page.new_shape()
+                                    s6.draw_rect(redact_rect)
+                                    s6.finish(fill=(0,0,0))
+                                    s6.commit()
+                                except Exception:
+                                    page.add_redact_annot(redact_rect, fill=(0,0,0))
+                            overlays.append((page_num, redact_rect, overlay, pattern_str, token))
+                            total_redactions += 1
+    # We draw filled rects directly (no apply_redactions)
 
     # Draw overlays (white text) centered in each redaction rect so they appear on top
     for pnum, rect, text, pat, token in overlays:

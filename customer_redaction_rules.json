@@ -1,5 +1,5 @@
 {
-    "713e0ffd5ef0cf28baae816639ddb4a8f596aa88b7b79e561bb53d50b8c8161b": [
+    "05e4ed755aa90669b45f356898bdacc8a6081dbdbd563e853fedc33599a54036": [
         {
             "page": 0,
             "anchor": "Số CMND: <ID>",
@@ -12,7 +12,29 @@
         },
         {
             "page": 0,
+            "anchor": "Số CMND",
+            "pattern": "(\\b\\d{9}\\b|\\b\\d{12}\\b)"
+        },
+        {
+            "page": 0,
             "anchor": "Số điện thoại",
+            "pattern": "(\\b(?:84|0)\\d{9}\\b)"
+        }
+    ],
+    "01bf8e32f80a25ed277ed65a2cc9bc9f80c9c4086868bd6a5ab99cfaf76224a2": [
+        {
+            "page": 0,
+            "anchor": "Số CMND: <ID>",
+            "pattern": "(\\b\\d{9}\\b|\\b\\d{12}\\b)"
+        },
+        {
+            "page": 0,
+            "anchor": "Số điện thoại: <ID>",
+            "pattern": "(\\b(?:84|0)\\d{9}\\b)"
+        },
+        {
+            "page": 0,
+            "anchor": "Số CMND",
             "pattern": "(\\b\\d{9}\\b|\\b\\d{12}\\b)"
         },
         {
