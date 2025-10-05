@@ -124,3 +124,12 @@ python src\pdf_contract_masking\contract_masking.py
 ```
 
 If no font is present the generator falls back to a default font which may not render Vietnamese correctly (you will see missing or replaced characters). Embedding a Unicode TTF fixes this.
+
+## Complex test PDF
+
+The repository contains a more complex test PDF at `contract/sample3.pdf` which includes:
+- Multiple labeled CMND and phone numbers (to test labeled extraction and redaction)
+- Many unlabeled numeric sequences and phone-like numbers (to test fallbacks)
+- Vietnamese text and punctuation to exercise font embedding
+
+Use `tests/test_complex_sample3.py` to run the pipeline on this file — it asserts the pipeline redacts labeled tokens, creates drawings, and stores sanitized anchors in the knowledge base.

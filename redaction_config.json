@@ -1,0 +1,14 @@
+{
+  "id": {
+    "name": "CMND/CCCD",
+    "pattern": "(\\b\\d{9}\\b|\\b\\d{12}\\b)",
+    "left_keep": 2,
+    "right_keep": 2
+  },
+  "phone": {
+    "name": "Phone",
+    "pattern": "(\\b(?:84|0)\\d{9}\\b)",
+    "left_keep": 4,
+    "right_keep": 2
+  }
+}

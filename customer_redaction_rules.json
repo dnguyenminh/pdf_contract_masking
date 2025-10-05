@@ -42,5 +42,47 @@
             "anchor": "Số điện thoại",
             "pattern": "(\\b(?:84|0)\\d{9}\\b)"
         }
+    ],
+    "fff8cd64ac21cf33c4515e220b03e9e69a22eac39663c4cf20a752d2001b3a8d": [
+        {
+            "page": 0,
+            "anchor": "Số CMND: <ID>",
+            "pattern": "(\\b\\d{9}\\b|\\b\\d{12}\\b)"
+        },
+        {
+            "page": 0,
+            "anchor": "Số điện thoại: <ID>",
+            "pattern": "(\\b(?:84|0)\\d{9}\\b)"
+        },
+        {
+            "page": 0,
+            "anchor": "",
+            "pattern": "(\\b\\d{9}\\b|\\b\\d{12}\\b)"
+        },
+        {
+            "page": 0,
+            "anchor": "<ID> Số tham",
+            "pattern": "(\\b\\d{9}\\b|\\b\\d{12}\\b)"
+        },
+        {
+            "page": 0,
+            "anchor": "Số điện thoại",
+            "pattern": "(\\b\\d{9}\\b|\\b\\d{12}\\b)"
+        },
+        {
+            "page": 0,
+            "anchor": "Số điện thoại",
+            "pattern": "(\\b(?:84|0)\\d{9}\\b)"
+        },
+        {
+            "page": 0,
+            "anchor": "",
+            "pattern": "(\\b(?:84|0)\\d{9}\\b)"
+        },
+        {
+            "page": 0,
+            "anchor": "kiểm tra cuối",
+            "pattern": "(\\b(?:84|0)\\d{9}\\b)"
+        }
     ]
 }
