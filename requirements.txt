@@ -1,16 +1,23 @@
 # Core runtime dependencies (pip)
 transformers>=4.30.0
-tqdm
-PyMuPDF
-regex
-sentencepiece
-tokenizers
+tqdm>=4.65.0
+PyMuPDF>=1.22.0
+regex>=2022.10.31
+sentencepiece>=0.1.98
+tokenizers>=0.13.3
+reportlab>=4.0.0        # used for sample PDF generation
+requests>=2.28.0        # HTTP client (for optional SpringAI adapter)
+httpx>=0.24.0           # alternative async HTTP client (optional)
 
-# NOTE: Installing torch via pip is possible but conda is recommended for binary compatibility.
-# If using pip, uncomment and choose the correct torch wheel for your platform.
-# torch
-# torchvision
-# torchaudio
+# Optional ML runtime (recommended to install with conda for best binary support)
+# If you want to run transformers with PyTorch locally, install torch separately.
+# Example (CPU): pip install torch --index-url https://download.pytorch.org/whl/cpu
+# Example (CUDA): follow https://pytorch.org/get-started/locally/
+torch>=2.0.0
 
-# For editable install during development
+# Dev / testing
+pytest>=7.0.0
+pytest-mock>=3.10.0
+
+# For editable install during development (keeps package pointing at local src/)
 -e .
