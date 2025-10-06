@@ -35,7 +35,12 @@ def load_ner_model():
         return None
 
 # Các từ khóa và Regex
-CUSTOMER_KEYWORDS = ['khách hàng', 'bên mua', 'bên b', 'bên được bảo hiểm', 'người mua']
+# Load customer keywords from config (fallback to sensible defaults)
+try:
+    _rc = load_redaction_config()
+    CUSTOMER_KEYWORDS = _rc.get('customer_keywords', ['khách hàng', 'bên mua', 'bên b', 'bên được bảo hiểm', 'người mua'])
+except Exception:
+    CUSTOMER_KEYWORDS = ['khách hàng', 'bên mua', 'bên b', 'bên được bảo hiểm', 'người mua']
 ID_REGEX = re.compile(r"(\b\d{9}\b|\b\d{12}\b)")
 PHONE_REGEX = re.compile(r"(\b(?:84|0)\d{9}\b)")
 KNOWLEDGE_BASE_FILE = "customer_redaction_rules.json"
@@ -172,7 +177,15 @@ def learn_customer_rules_with_ai(doc, nlp_pipeline):
                     rects = page.search_for(val)
                     if rects:
                         raw_anchor = lm.group(0)[:40]
+                        lower_raw = raw_anchor.lower()
+                        money_keywords = ['số tiền', 'khoản vay', 'khoản', 'giá trị', 'thanh toán', 'số tiền (vnđ)']
+                        # do not create ID/phone rules for money/loan labels
+                        if any(k in lower_raw for k in money_keywords):
+                            continue
                         rule_anchor = sanitize_anchor_text(raw_anchor)
+                        if not rule_anchor or not rule_anchor.strip():
+                            # avoid saving empty anchors which cause page-wide matches
+                            continue
                         rule = {"page": page_num, "anchor": rule_anchor, "pattern": pat}
                         if rule not in rules:
                             rules.append(rule)
@@ -220,17 +233,88 @@ def learn_customer_rules_with_ai(doc, nlp_pipeline):
                                 break
 
                     pattern = ID_REGEX.pattern if ID_REGEX.search(s_text) else PHONE_REGEX.pattern
+                    # avoid creating empty or money/loan anchors which lead to broad false positives
+                    if not anchor or not str(anchor).strip():
+                        continue
+                    lower_anchor = str(anchor).lower()
+                    money_keywords = ['số tiền', 'khoản vay', 'khoản', 'giá trị', 'thanh toán']
+                    if any(k in lower_anchor for k in money_keywords):
+                        # anchor indicates monetary field; skip creating phone/ID redaction rules for it
+                        continue
+
                     rule_anchor = sanitize_anchor_text(anchor or "")
+                    if not rule_anchor or not rule_anchor.strip():
+                        continue
                     rule = {"page": page_num, "anchor": rule_anchor, "pattern": pattern}
                     if rule not in rules:
                         rules.append(rule)
                         print(f"      -> Đã học quy tắc (words): Tìm '{rule_anchor}' rồi tìm số theo mẫu {pattern}.")
     return rules
 
-def apply_rules(doc, rules):
+def apply_rules(doc, rules, nlp_pipeline=None):
     print("  -> Chế độ Tái sử dụng: Áp dụng quy tắc đã học...")
     total_redactions = 0
     overlays = []  # list of tuples (page_num, rect, overlay_text, pattern_str, token)
+
+    # Optional strict mode: require detected person name proximity before redacting.
+    REQUIRE_NEAR_PERSON = os.environ.get('REQUIRE_NEAR_PERSON', '0') == '1' and (nlp_pipeline is not None)
+    person_rects_by_page = {}
+    if REQUIRE_NEAR_PERSON:
+        try:
+            for pnum, page in enumerate(doc):
+                txt = page.get_text("text")
+                if not txt.strip():
+                    person_rects_by_page[pnum] = []
+                    continue
+                try:
+                    ner_res = nlp_pipeline(txt)
+                except Exception:
+                    ner_res = []
+                names = [ent['word'] for ent in ner_res if ent.get('entity_group') == 'PER']
+                rects = []
+                for name in set(names):
+                    try:
+                        for r in page.search_for(name):
+                            rects.append(r)
+                    except Exception:
+                        continue
+                person_rects_by_page[pnum] = rects
+        except Exception:
+            person_rects_by_page = {}
+
+    def is_near_person(page_num, area: fitz.Rect) -> bool:
+        # If no strict mode, always allow
+        if not REQUIRE_NEAR_PERSON:
+            return True
+        rects = person_rects_by_page.get(page_num, [])
+        if not rects:
+            return False
+        # expand person rects slightly and check intersection
+        for pr in rects:
+            exp = fitz.Rect(pr.x0 - 200, pr.y0 - 30, pr.x1 + 200, pr.y1 + 30)
+            if exp.intersects(area):
+                return True
+        return False
+
+    def has_nearby_customer_keyword(page, area: fitz.Rect) -> bool:
+        try:
+            check = area + (-200, -20, 200, 20)
+            nearby = page.get_text(clip=check).lower()
+            return any(kw in nearby for kw in CUSTOMER_KEYWORDS)
+        except Exception:
+            return False
+
+    def allow_redaction(page_num, page, area: fitz.Rect, anchor: str) -> bool:
+        # Allow if anchor is present (learned rule tied to anchor)
+        if anchor and anchor.strip():
+            return True
+        # Allow if there's an explicit nearby customer keyword (heuristic)
+        if has_nearby_customer_keyword(page, area):
+            return True
+        # Allow if strict NER proximity mode is enabled and token is near a detected person
+        if REQUIRE_NEAR_PERSON and is_near_person(page_num, area):
+            return True
+        return False
 
     def mask_token_display(token: str, pattern_str: str) -> str:
         # normalize to digits for masking
@@ -307,6 +391,108 @@ def apply_rules(doc, rules):
         if page_num < len(doc):
             page = doc[page_num]
             anchor_rects = page.search_for(anchor)
+            # If anchor was sanitized (contains placeholders like <ID> or <PHONE>)
+            # page.search_for won't find the literal string. Try to find the labeled
+            # token by searching page text for the label followed by the number pattern.
+            if anchor and not anchor_rects and any(x in anchor for x in ['<ID>', '<PHONE>', '<NUM>']):
+                try:
+                    page_text = page.get_text('text')
+                    # derive a readable label from the sanitized anchor (e.g. 'Số CMND', 'Số điện thoại')
+                    label_text = anchor.replace('<ID>', '').replace('<PHONE>', '').replace('<NUM>', '').strip()
+                    if label_text:
+                        # try to find the label rect(s) on the page
+                        try:
+                            label_rects = page.search_for(label_text)
+                        except Exception:
+                            label_rects = []
+
+                        # fallback: try some small fuzzy variants if exact label search fails
+                        if not label_rects:
+                            alt = label_text.split()[:3]
+                            if alt:
+                                lbl = " ".join(alt)
+                                try:
+                                    label_rects = page.search_for(lbl)
+                                except Exception:
+                                    label_rects = []
+
+                        # If we have label rects, only redact tokens that are near those rects
+                        if label_rects:
+                            pnum = pattern_str
+                            # find candidate tokens using the number pattern in the page text
+                            for m in re.finditer(pnum, page_text):
+                                token = m.group(0)
+                                token_rects = page.search_for(token)
+                                for area in token_rects:
+                                    # check refined intersection/proximity with any label rect
+                                    nearby = False
+                                    for lr in label_rects:
+                                        try:
+                                            label_text = page.get_text(clip=lr).lower()
+                                        except Exception:
+                                            label_text = ""
+
+                                        # If label clearly indicates money/loan, do not treat it as a phone/ID label
+                                        money_keywords = ['số tiền', 'khoản vay', 'khoản', 'giá trị', 'thanh toán']
+                                        if any(k in label_text for k in money_keywords):
+                                            # skip this label for phone/ID redaction decisions
+                                            continue
+
+                                        # prefer tokens that are on the same line and to the right of the label
+                                        mid_area_y = (area.y0 + area.y1) / 2.0
+                                        mid_lr_y = (lr.y0 + lr.y1) / 2.0
+                                        same_line = abs(mid_area_y - mid_lr_y) <= 14
+                                        to_right = area.x0 >= (lr.x1 - 2)
+                                        if not (same_line and to_right):
+                                            # not the inline/right-of-label layout we expect
+                                            continue
+
+                                        # ensure label text semantically matches the pattern we intend to redact
+                                        allow_phone_label = any(x in label_text for x in ['điện thoại', 'sđt'])
+                                        allow_id_label = any(x in label_text for x in ['cmnd', 'căn cước', 'cccd'])
+                                        digits_only = re.sub(r"\D", "", token)
+                                        if (pattern_str == PHONE_REGEX.pattern or PHONE_REGEX.fullmatch(digits_only)) and not allow_phone_label:
+                                            continue
+                                        if (pattern_str == ID_REGEX.pattern or ID_REGEX.fullmatch(digits_only)) and not allow_id_label:
+                                            continue
+
+                                        # If we reach here, this token is inline/right-of the label and semantically permitted
+                                        nearby = True
+                                        break
+                                    if not nearby:
+                                        continue
+
+                                    # compute how many digits to keep
+                                    digits = re.sub(r"\D", "", token)
+                                    if (pattern_str == ID_REGEX.pattern or ID_REGEX.fullmatch(digits)) and len(digits) >= 4:
+                                        cfg = REDACTION_CONFIG.get('id', {})
+                                        left_keep = int(cfg.get('left_keep', 2))
+                                        right_keep = int(cfg.get('right_keep', 2))
+                                    elif (pattern_str == PHONE_REGEX.pattern or PHONE_REGEX.fullmatch(digits)) and len(digits) >= 6:
+                                        cfg = REDACTION_CONFIG.get('phone', {})
+                                        left_keep = int(cfg.get('left_keep', 4))
+                                        right_keep = int(cfg.get('right_keep', 2))
+                                    else:
+                                        left_keep, right_keep = 0, 0
+
+                                    redact_rect = get_mid_redact_rect(page, area, token, left_keep, right_keep)
+                                    overlay = visible_token_overlay(token, pattern_str)
+                                    if allow_redaction(page_num, page, redact_rect, anchor):
+                                        try:
+                                            page.draw_rect(redact_rect, color=(0, 0, 0), fill=(0, 0, 0))
+                                        except Exception:
+                                            try:
+                                                s2 = page.new_shape()
+                                                s2.draw_rect(redact_rect)
+                                                s2.finish(fill=(0,0,0))
+                                                s2.commit()
+                                            except Exception:
+                                                page.add_redact_annot(redact_rect, fill=(0, 0, 0))
+                                        overlays.append((page_num, redact_rect, overlay, pattern_str, token))
+                                        total_redactions += 1
+                        # else: if we couldn't find the label on page, fall through and let other anchors/rules handle it
+                except Exception:
+                    pass
             if anchor and anchor_rects:
                 matched_any = False
                 for an_rect in anchor_rects:
@@ -365,18 +551,19 @@ def apply_rules(doc, rules):
 
                             redact_rect = get_mid_redact_rect(page, area, token, left_keep, right_keep)
                             overlay = visible_token_overlay(token, pattern_str)
-                            try:
-                                page.draw_rect(redact_rect, color=(0, 0, 0), fill=(0, 0, 0))
-                            except Exception:
+                            if allow_redaction(page_num, page, redact_rect, anchor):
                                 try:
-                                    s2 = page.new_shape()
-                                    s2.draw_rect(redact_rect)
-                                    s2.finish(fill=(0,0,0))
-                                    s2.commit()
+                                    page.draw_rect(redact_rect, color=(0, 0, 0), fill=(0, 0, 0))
                                 except Exception:
-                                    page.add_redact_annot(redact_rect, fill=(0, 0, 0))
-                            overlays.append((page_num, redact_rect, overlay, pattern_str, token))
-                            total_redactions += 1
+                                    try:
+                                        s2 = page.new_shape()
+                                        s2.draw_rect(redact_rect)
+                                        s2.finish(fill=(0,0,0))
+                                        s2.commit()
+                                    except Exception:
+                                        page.add_redact_annot(redact_rect, fill=(0, 0, 0))
+                                overlays.append((page_num, redact_rect, overlay, pattern_str, token))
+                                total_redactions += 1
                         matched_any = True
                         continue
 
@@ -402,23 +589,30 @@ def apply_rules(doc, rules):
                                 left_keep, right_keep = 0, 0
                             redact_rect = get_mid_redact_rect(page, area, token, left_keep, right_keep)
                             overlay = visible_token_overlay(token, pattern_str)
-                            try:
-                                page.draw_rect(redact_rect, color=(0,0,0), fill=(0,0,0))
-                            except Exception:
+                            if allow_redaction(page_num, page, redact_rect, anchor):
                                 try:
-                                    s4 = page.new_shape()
-                                    s4.draw_rect(redact_rect)
-                                    s4.finish(fill=(0,0,0))
-                                    s4.commit()
+                                    page.draw_rect(redact_rect, color=(0,0,0), fill=(0,0,0))
                                 except Exception:
-                                    page.add_redact_annot(redact_rect, fill=(0,0,0))
-                            overlays.append((page_num, redact_rect, overlay, pattern_str, token))
-                            total_redactions += 1
+                                    try:
+                                        s4 = page.new_shape()
+                                        s4.draw_rect(redact_rect)
+                                        s4.finish(fill=(0,0,0))
+                                        s4.commit()
+                                    except Exception:
+                                        page.add_redact_annot(redact_rect, fill=(0,0,0))
+                                overlays.append((page_num, redact_rect, overlay, pattern_str, token))
+                                total_redactions += 1
                         matched_any = True
                         continue
 
-                # if none of the anchor rects matched, fall back to page-wide search for this pattern
+                # if none of the anchor rects matched, avoid doing a page-wide blind search
+                # by default because it causes many false positives (redacting numbers
+                # that are not related to the customer). To enable the old behavior set
+                # environment variable ALLOW_PAGE_WIDE_FALLBACK=1.
                 if not matched_any:
+                    if os.environ.get('ALLOW_PAGE_WIDE_FALLBACK', '0') != '1':
+                        # skip aggressive page-wide fallback to favor precision
+                        continue
                     page_text = page.get_text("text")
                     for m in pattern.finditer(page_text):
                         token = m.group(0)
@@ -439,18 +633,20 @@ def apply_rules(doc, rules):
                                 left_keep, right_keep = 0, 0
                             redact_rect = get_mid_redact_rect(page, area, token, left_keep, right_keep)
                             overlay = visible_token_overlay(token, pattern_str)
-                            try:
-                                page.draw_rect(redact_rect, color=(0,0,0), fill=(0,0,0))
-                            except Exception:
+                            # For page-wide fallback, anchor variable may not be defined here; pass ''
+                            if allow_redaction(page_num, page, redact_rect, ''):
                                 try:
-                                    s5 = page.new_shape()
-                                    s5.draw_rect(redact_rect)
-                                    s5.finish(fill=(0,0,0))
-                                    s5.commit()
+                                    page.draw_rect(redact_rect, color=(0,0,0), fill=(0,0,0))
                                 except Exception:
-                                    page.add_redact_annot(redact_rect, fill=(0,0,0))
-                            overlays.append((page_num, redact_rect, overlay, pattern_str, token))
-                            total_redactions += 1
+                                    try:
+                                        s5 = page.new_shape()
+                                        s5.draw_rect(redact_rect)
+                                        s5.finish(fill=(0,0,0))
+                                        s5.commit()
+                                    except Exception:
+                                        page.add_redact_annot(redact_rect, fill=(0,0,0))
+                                overlays.append((page_num, redact_rect, overlay, pattern_str, token))
+                                total_redactions += 1
             else:
                 # Fallback: search entire page text for pattern and redact all matches
                 page_text = page.get_text("text")
@@ -472,18 +668,19 @@ def apply_rules(doc, rules):
                                 left_keep, right_keep = 0, 0
                             redact_rect = get_mid_redact_rect(page, area, token, left_keep, right_keep)
                             overlay = visible_token_overlay(token, pattern_str)
-                            try:
-                                page.draw_rect(redact_rect, color=(0,0,0), fill=(0,0,0))
-                            except Exception:
+                            if allow_redaction(page_num, page, redact_rect, ''):
                                 try:
-                                    s6 = page.new_shape()
-                                    s6.draw_rect(redact_rect)
-                                    s6.finish(fill=(0,0,0))
-                                    s6.commit()
+                                    page.draw_rect(redact_rect, color=(0,0,0), fill=(0,0,0))
                                 except Exception:
-                                    page.add_redact_annot(redact_rect, fill=(0,0,0))
-                            overlays.append((page_num, redact_rect, overlay, pattern_str, token))
-                            total_redactions += 1
+                                    try:
+                                        s6 = page.new_shape()
+                                        s6.draw_rect(redact_rect)
+                                        s6.finish(fill=(0,0,0))
+                                        s6.commit()
+                                    except Exception:
+                                        page.add_redact_annot(redact_rect, fill=(0,0,0))
+                                overlays.append((page_num, redact_rect, overlay, pattern_str, token))
+                                total_redactions += 1
     # We draw filled rects directly (no apply_redactions)
 
     # Draw overlays (white text) centered in each redaction rect so they appear on top
@@ -520,11 +717,11 @@ def process_pdf_final(input_pdf, output_pdf, nlp_pipeline, knowledge_base):
         print(f"--- Đang xử lý file: {input_pdf} ---")
         fingerprint = create_fingerprint(doc)
         if fingerprint and fingerprint in knowledge_base:
-            total_redactions = apply_rules(doc, knowledge_base[fingerprint])
+            total_redactions = apply_rules(doc, knowledge_base[fingerprint], nlp_pipeline)
         else:
             new_rules = learn_customer_rules_with_ai(doc, nlp_pipeline)
             if new_rules:
-                total_redactions = apply_rules(doc, new_rules)
+                total_redactions = apply_rules(doc, new_rules, nlp_pipeline)
                 if fingerprint:
                     # sanitize anchors defensively before persisting KB
                     sanitized_rules = []

@@ -11,4 +11,12 @@
     "left_keep": 4,
     "right_keep": 2
   }
+  ,
+  "customer_keywords": [
+    "khách hàng",
+    "bên mua",
+    "bên b",
+    "bên được bảo hiểm",
+    "người mua"
+  ]
 }
