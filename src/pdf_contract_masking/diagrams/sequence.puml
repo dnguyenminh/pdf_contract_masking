@@ -1,0 +1,15 @@
+@startuml
+' Sequence diagram: process_pdf_final
+actor User
+User -> PDFProcessor: process_pdf_final(input, output)
+PDFProcessor -> KnowledgeBase: create_fingerprint(doc)
+alt fingerprint in KB
+PDFProcessor -> Redactor: apply_rules(doc, rules)
+else new document
+PDFProcessor -> RuleLearner: learn(doc, nlp_pipeline)
+RuleLearner --> PDFProcessor: rules
+PDFProcessor -> Redactor: apply_rules(doc, rules)
+PDFProcessor -> KnowledgeBase: save(fingerprint -> rules)
+end
+PDFProcessor -> FileSystem: save(output)
+@enduml

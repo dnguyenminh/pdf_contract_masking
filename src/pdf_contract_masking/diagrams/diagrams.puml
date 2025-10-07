@@ -1,0 +1,16 @@
+@startuml
+' Class diagram
+class NERModelLoader
+class RedactionConfig
+class KnowledgeBase
+class RuleLearner
+class Redactor
+class PDFProcessor
+NERModelLoader --> PDFProcessor : provides nlp_pipeline
+RedactionConfig --> Redactor
+KnowledgeBase --> PDFProcessor
+RuleLearner --> PDFProcessor
+Redactor --> PDFProcessor
+PDFProcessor o-- RuleLearner
+PDFProcessor o-- Redactor
+@enduml
