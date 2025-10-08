@@ -1,4 +1,41 @@
 {
+    "e315f682c78a51e836960d813437b863319b31109519abb14a6234626a2e9914": [
+        {
+            "page": 0,
+            "anchor": "Số CMND: <ID>",
+            "pattern": "(\\b\\d{9}\\b|\\b\\d{12}\\b)"
+        },
+        {
+            "page": 0,
+            "anchor": "Số Điện thoại: <ID>",
+            "pattern": "(\\b(?:84|0)\\d{9}\\b)"
+        },
+        {
+            "page": 0,
+            "anchor": "ĐT cố định",
+            "pattern": "(\\b(?:84|0)\\d{9}\\b)"
+        },
+        {
+            "page": 0,
+            "anchor": "và việc làm",
+            "pattern": "(\\b(?:84|0)\\d{9}\\b)"
+        },
+        {
+            "page": 0,
+            "anchor": "Lê Xuân Đào",
+            "pattern": "(\\b(?:84|0)\\d{9}\\b)"
+        },
+        {
+            "page": 0,
+            "anchor": "tin gia đình",
+            "pattern": "(\\b(?:84|0)\\d{9}\\b)"
+        },
+        {
+            "page": 1,
+            "anchor": "bên b",
+            "pattern": "(\\b\\d{9}\\b|\\b\\d{12}\\b)"
+        }
+    ],
     "05e4ed755aa90669b45f356898bdacc8a6081dbdbd563e853fedc33599a54036": [
         {
             "page": 0,
@@ -18,6 +55,43 @@
         {
             "page": 0,
             "anchor": "Số điện thoại",
+            "pattern": "(\\b(?:84|0)\\d{9}\\b)"
+        }
+    ],
+    "1780a6dfbe97177e15613c61f6d6c8bd08e80ba5cfd3c921e106ca91af0a2943": [
+        {
+            "page": 0,
+            "anchor": "Số CMND: <ID>",
+            "pattern": "(\\b\\d{9}\\b|\\b\\d{12}\\b)"
+        },
+        {
+            "page": 0,
+            "anchor": "Số Điện thoại: <ID>",
+            "pattern": "(\\b(?:84|0)\\d{9}\\b)"
+        },
+        {
+            "page": 0,
+            "anchor": "Thông tin học",
+            "pattern": "(\\b\\d{9}\\b|\\b\\d{12}\\b)"
+        },
+        {
+            "page": 0,
+            "anchor": "ĐT cố định",
+            "pattern": "(\\b(?:84|0)\\d{9}\\b)"
+        },
+        {
+            "page": 0,
+            "anchor": "và việc làm",
+            "pattern": "(\\b(?:84|0)\\d{9}\\b)"
+        },
+        {
+            "page": 0,
+            "anchor": "NGUYỄN KHÁNH ĐOAN",
+            "pattern": "(\\b(?:84|0)\\d{9}\\b)"
+        },
+        {
+            "page": 0,
+            "anchor": "tin gia đình",
             "pattern": "(\\b(?:84|0)\\d{9}\\b)"
         }
     ],

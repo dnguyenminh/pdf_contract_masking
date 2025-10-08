@@ -7,7 +7,7 @@
   },
   "phone": {
     "name": "Phone",
-    "pattern": "(\\b(?:84|0)\\d{9}\\b)",
+    "pattern": "(?:\\+?84|0)[\\s.\\-()]*\\d[\\d\\s.\\-()]{7,}\\b",
     "left_keep": 4,
     "right_keep": 2
   }
@@ -17,6 +17,26 @@
     "bên mua",
     "bên b",
     "bên được bảo hiểm",
-    "người mua"
+    "người mua",
+    "người đề nghị",
+    "thông tin cá nhân",
+    "thông tin liên hệ"
   ]
+  ,
+  "exclude": {
+    "imei": {
+      "enabled": true,
+      "labels": [
+        "imei",
+        "emei",
+        "số imei",
+        "so imei",
+        "sốemei",
+        "eimei",
+        "e-mei",
+        "e me i"
+      ],
+      "min_digits": 13
+    }
+  }
 }

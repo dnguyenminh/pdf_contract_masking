@@ -1,4 +1,5 @@
 import os
+import re
 from tqdm import tqdm
 from .config import RedactionConfig
 from .knowledge_base import KnowledgeBase
@@ -58,8 +59,73 @@ class PDFProcessor:
             except Exception:
                 logger.exception("Failed to prepare output directory for %s", out_path)
 
-            # Attempt to save and then verify file existence
+            # Attempt to apply redact annotations (if any) then save
             try:
+                # Try Document-level apply_redactions first (may not exist)
+                applied = False
+                if hasattr(doc, 'apply_redactions'):
+                    try:
+                        doc.apply_redactions()
+                        applied = True
+                    except Exception:
+                        logger.debug("processor: doc.apply_redactions() failed; falling back to per-page apply")
+
+                # Fallback: call apply_redactions on each page if document-level not available
+                if not applied:
+                    for p in doc:
+                        try:
+                            if hasattr(p, 'apply_redactions'):
+                                p.apply_redactions()
+                        except Exception:
+                            logger.debug("processor: page.apply_redactions() failed for page %s", getattr(p, 'number', '?'))
+                # Heuristic check: some PyMuPDF builds may leave selectable text
+                # behind even after redact annotations are applied. If any page
+                # still contains phone-like or ID-like tokens (per our regexes),
+                # rasterize those pages to ensure no selectable digits remain.
+                try:
+                    pages_to_rasterize = []
+                    # Use the redactor's compiled patterns if available
+                    phone_re = getattr(self.redactor, '_phone_re', None)
+                    id_re = getattr(self.redactor, '_id_re', None)
+                    for i in range(len(doc)):
+                        try:
+                            p = doc[i]
+                            txt = p.get_text('text') or ''
+                        except Exception:
+                            txt = ''
+                        found = False
+                        try:
+                            # Many PDFs split numbers with whitespace/newlines. Use a
+                            # digits-only normalized string for robust detection.
+                            digits_only = re.sub(r"\D", "", txt)
+                            # phone-like: starts with 84 or 0 and has at least 9 digits total
+                            if re.search(r"(?:84|0)\d{7,}", digits_only):
+                                found = True
+                            # ID-like: 9 or 12 digit tokens often need removal as well
+                            if not found and re.search(r"\d{9}|\d{12}", digits_only):
+                                found = True
+                        except Exception:
+                            # if pattern matching fails, skip
+                            pass
+                        if found:
+                            pages_to_rasterize.append(i)
+                    # Rasterize pages from end->start to keep indices stable
+                    for pnum in reversed(pages_to_rasterize):
+                        try:
+                            page = doc[pnum]
+                            # render at reasonable resolution
+                            pix = page.get_pixmap(matrix=fitz.Matrix(2, 2))
+                            rect = page.rect
+                            # remove original page and replace with an image-only page
+                            doc.delete_page(pnum)
+                            newp = doc.new_page(pnum, width=rect.width, height=rect.height)
+                            newp.insert_image(rect, pixmap=pix)
+                            logger.info("processor: rasterized page %d to remove leftover selectable tokens", pnum)
+                        except Exception:
+                            logger.exception("processor: rasterizing page %s failed", pnum)
+                except Exception:
+                    logger.exception("processor: post-redaction rasterize check failed")
+
                 logger.info("Saving processed document to: %s", out_path)
                 doc.save(out_path, garbage=4, deflate=True, clean=True)
             except Exception:

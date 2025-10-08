@@ -26,3 +26,10 @@ class RedactionConfig:
     def get_keep(self, kind: str):
         return (int(self.cfg.get(kind, {}).get("left_keep", 0)),
                 int(self.cfg.get(kind, {}).get("right_keep", 0)))
+
+    def get_exclusion(self, key: str, default=None):
+        """Return exclusion settings for a given key (e.g., 'imei').
+
+        Returns the raw dictionary from config or the provided default.
+        """
+        return self.cfg.get("exclude", {}).get(key, default)
